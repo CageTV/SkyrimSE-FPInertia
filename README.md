@@ -52,5 +52,4 @@ Install the original mod first (its weapon data and presets are needed), then pu
 Edit `Data/SKSE/Plugins/FPInertia.ini` to customize settings.
 
 ## License
-
-MIT License
+The source files are MIT licensed (original copyright DCC Studios, `LICENSE-MIT.txt`). The compiled `FPInertia.dll` is built with alandtse's CommonLibSSE-NG (GPL-3.0 with a modding exception) and is therefore distributed under the **GNU General Public License, version 3 or later** (`LICENSE`). See `NOTICE.txt`. The source of every release is this repository at the release tag.
