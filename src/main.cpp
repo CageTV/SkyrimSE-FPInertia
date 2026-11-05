@@ -22,7 +22,7 @@ namespace
 		*path /= fmt::format("{}.log"sv, Plugin::NAME);
 		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
 
-		const auto level = spdlog::level::trace;
+		const auto level = spdlog::level::info;  // was trace + flush on every line
 
 		auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
 		log->set_level(level);
@@ -55,6 +55,7 @@ void MessageHandler(SKSE::MessagingInterface::Message* a_msg)
 	}
 }
 
+#ifndef FPI_NG  // the ng build (alandtse CommonLibSSE-NG, Skyrim 1.6.1170 and 1.7.x) generates SKSEPlugin_Query / SKSEPlugin_Version from ng.cmake
 extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Query(const SKSE::QueryInterface* a_skse, SKSE::PluginInfo* a_info)
 {
 	a_info->infoVersion = SKSE::PluginInfo::kVersion;
@@ -88,8 +89,13 @@ extern "C" DLLEXPORT constinit auto SKSEPlugin_Version = []() {
 
 	return v;
 }();
+#endif
 
+#ifdef FPI_NG
+SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
+#else
 extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)
+#endif
 {
 	InitializeLog();
 	logger::info("{} v{}"sv, Plugin::NAME, Plugin::VERSION.string());

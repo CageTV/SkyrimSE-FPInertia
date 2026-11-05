@@ -23,3 +23,14 @@ using namespace std::literals;
 namespace logger = SKSE::log;
 namespace stl = SKSE::stl;
 
+
+#ifdef FPI_NG
+// the older CommonLibSSE this plugin was written against had RE::DebugNotification; alandtse's has the HUD message call only
+namespace RE
+{
+	inline void DebugNotification(const char* a_text, const char* a_sound = nullptr, bool a_cancelIfQueued = true)
+	{
+		SendHUDMessage::ShowHUDMessage(a_text, a_sound, a_cancelIfQueued);
+	}
+}
+#endif

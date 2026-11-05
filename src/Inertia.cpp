@@ -1317,6 +1317,7 @@ namespace Inertia
 	{
 		auto* settings = Settings::GetSingleton();
 		if (!settings->enabled) {
+			deferredOffsets.hasOffsets = false;
 			return;
 		}
 		
@@ -1794,6 +1795,7 @@ namespace Inertia
 		// This ensures offsets are applied AFTER the game's animation system updates
 		
 		deferredOffsets.hasOffsets = true;
+		deferredOffsets.computedAt = std::chrono::steady_clock::now();
 		deferredOffsets.useDualClaviclePivot = useDualClaviclePivot;
 		deferredOffsets.combinedState = combinedState;
 		deferredOffsets.combinedStateLeft = combinedStateLeft;
@@ -1834,6 +1836,10 @@ namespace Inertia
 	void InertiaManager::OnFirstPersonUpdate(RE::NiAVObject* a_firstPersonObject)
 	{
 		if (!a_firstPersonObject || !deferredOffsets.hasOffsets) {
+			return;
+		}
+		if (std::chrono::steady_clock::now() - deferredOffsets.computedAt > std::chrono::milliseconds(150)) {
+			deferredOffsets.hasOffsets = false;  // the physics step stopped (menu, state change): do not keep applying an old pose
 			return;
 		}
 		
@@ -1906,6 +1912,7 @@ namespace Inertia
 			}
 
 			lastTargetNode = targetNode;
+			if (settings->debugLogging && debugFrameCounter % 30 == 0)
 			logger::info("[FPInertia] Applying skeleton inertia - Node: '{}', Position: ({:.3f}, {:.3f}, {:.3f}), Rotation: ({:.3f}, {:.3f}, {:.3f})",
 				targetNode->name.c_str(),
 				combinedState.positionOffset.x, combinedState.positionOffset.y, combinedState.positionOffset.z,
@@ -1918,6 +1925,7 @@ namespace Inertia
 		// This preserves correct previousWorld for motion vectors (TAA, upscaling, frame gen)
 
 		// Log the final skeleton inertia values for reference
+		if (settings->debugLogging && debugFrameCounter % 30 == 0)
 		logger::info("[FPInertia] FINAL: Skeleton inertia applied - Position: ({:.3f}, {:.3f}, {:.3f}), Rotation: ({:.3f}, {:.3f}, {:.3f})",
 			combinedState.positionOffset.x, combinedState.positionOffset.y, combinedState.positionOffset.z,
 			combinedState.rotationOffset.x, combinedState.rotationOffset.y, combinedState.rotationOffset.z);
@@ -1932,8 +1940,9 @@ namespace Inertia
 			loggedFirstUpdate = true;
 		}
 		
-		// Clear the deferred offsets (they've been applied)
-		deferredOffsets.hasOffsets = false;
+		// The offsets stay valid: a frame without a fresh physics step (rate limiter, frame generation) must still apply the last ones,
+		// otherwise the pose pops back to the un-offset animation for that frame = flicker / ghosting above ~140 fps.
+		// They are replaced by the next Update, dropped when too old, and cleared by Reset / leaving first person / disabling.
 	}
 
 	void InertiaManager::Reset()
@@ -2343,6 +2352,9 @@ namespace Inertia
 	// Main update hook - calculates spring physics and stores deferred offsets
 	namespace Hook
 	{
+		// a rel32 CALL (E8) at the site: refuses to patch other bytes when a game version moved the call
+		inline bool IsCallSite(std::uintptr_t a_site) { return *reinterpret_cast<const std::uint8_t*>(a_site) == 0xE8; }
+
 		class MainUpdateHook
 		{
 		public:
@@ -2351,12 +2363,18 @@ namespace Inertia
 				auto& trampoline = SKSE::GetTrampoline();
 				
 				REL::Relocation<std::uintptr_t> hook{ RELOCATION_ID(35565, 36564) };  // Main update
-				
-				logger::info("[FPInertia] Main update hook address base: {:X}", hook.address());
-				logger::info("[FPInertia] Main update offset: SE={:X}, AE={:X}", 0x748, 0xC26);
-				
-				_originalUpdate = trampoline.write_call<5>(hook.address() + RELOCATION_OFFSET(0x748, 0xC26), OnUpdate);
-				
+
+				// SE 0x748, AE 1.6.x 0xC26, AE 1.7.99+ 0xC38 (checked against the 1.7.104 executable: rel32 call; Community Shaders hooks the same site there)
+				const std::uintptr_t offset = REL::Module::IsAE() ? (REL::Module::IsAtLeast(SKSE::RUNTIME_SSE_1_7_99) ? 0xC38 : 0xC26) : 0x748;
+				const std::uintptr_t site = hook.address() + offset;
+				logger::info("[FPInertia] Main update hook: base {:X}, offset {:X}", hook.address(), offset);
+				if (!IsCallSite(site)) {
+					logger::error("[FPInertia] Main update hook site is not a call on this game version - hook NOT installed, inertia disabled");
+					return;
+				}
+
+				_originalUpdate = trampoline.write_call<5>(site, OnUpdate);
+
 				logger::info("[FPInertia] Installed main update hook successfully");
 			}
 
@@ -2408,12 +2426,17 @@ namespace Inertia
 				// Hook UpdateFirstPerson at REL::RelocationID(39446, 40522) + 0xD7
 				// This is after the game's animation update, so our changes persist
 				REL::Relocation<std::uintptr_t> hook{ RELOCATION_ID(39446, 40522) };
-				
-				logger::info("[FPInertia] UpdateFirstPerson hook address base: {:X}", hook.address());
-				logger::info("[FPInertia] UpdateFirstPerson offset: 0xD7");
-				
-				_originalFunc = trampoline.write_call<5>(hook.address() + 0xD7, OnFirstPersonUpdate);
-				
+
+				// unchanged on 1.7.x (the same site ImprovedCameraSE-NG hooks there; rel32 call in the 1.7.104 executable)
+				const std::uintptr_t site = hook.address() + 0xD7;
+				logger::info("[FPInertia] UpdateFirstPerson hook: base {:X}, offset D7", hook.address());
+				if (!IsCallSite(site)) {
+					logger::error("[FPInertia] UpdateFirstPerson hook site is not a call on this game version - hook NOT installed, inertia disabled");
+					return;
+				}
+
+				_originalFunc = trampoline.write_call<5>(site, OnFirstPersonUpdate);
+
 				logger::info("[FPInertia] Installed UpdateFirstPerson hook successfully (frame-gen compatible)");
 			}
 			

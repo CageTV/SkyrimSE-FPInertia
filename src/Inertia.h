@@ -211,6 +211,7 @@ namespace Inertia
 		// Frame-gen compatible deferred application (computed in Update, applied in OnFirstPersonUpdate)
 		struct DeferredOffsets {
 			bool hasOffsets{ false };           // True if offsets are ready to apply
+			std::chrono::steady_clock::time_point computedAt{};  // when the physics step that produced them ran
 			bool useDualClaviclePivot{ false }; // Which pivot mode to use
 			SpringState combinedState;          // Right hand / main spine offsets
 			SpringState combinedStateLeft;      // Left hand offsets (for dual clavicle)
